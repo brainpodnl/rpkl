@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{Read, Write},
+    path::PathBuf,
     process::{Child, Command, Stdio},
 };
 
@@ -37,6 +38,9 @@ pub(crate) const OUTGOING_MESSAGE_REQUEST_ID: u64 = 9805131;
 // options that can be provided to the evaluator, such as properties (-p flag from CLI)
 #[derive(Default)]
 pub struct EvaluatorOptions {
+    /// Working directory for the pkl server process
+    pub root_dir: Option<PathBuf>,
+
     /// Properties to pass to the evaluator. Used to read from `props:` in `.pkl` files
     pub properties: Option<MapImpl<String, String>>,
 
@@ -56,6 +60,12 @@ pub struct EvaluatorOptions {
 impl EvaluatorOptions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the root directory for the evaluator
+    pub fn root_dir(mut self, root_dir: impl Into<PathBuf>) -> Self {
+        self.root_dir = Some(root_dir.into());
+        self
     }
 
     /// Add a property to the evaluator options map
@@ -181,8 +191,9 @@ impl Evaluator {
     /// The evaluator will be closed when it is dropped
     /// # Errors
     /// - Returns an error if the pkl process fails to start or if the evaluator fails to be created
-    pub fn new_from_options(options: EvaluatorOptions) -> Result<Self> {
-        let mut child = start_pkl(false).map_err(|_e| Error::PklProcessStart)?;
+    pub fn new_from_options(mut options: EvaluatorOptions) -> Result<Self> {
+        let mut child =
+            start_pkl(options.root_dir.take(), false).map_err(|_e| Error::PklProcessStart)?;
         let child_stdin = child.stdin.as_mut().context("failed to get stdin")?;
         let mut child_stdout = child.stdout.take().context("failed to get stdout")?;
 
@@ -324,7 +335,7 @@ impl Drop for Evaluator {
     }
 }
 
-fn start_pkl(pkl_debug: bool) -> Result<Child> {
+fn start_pkl(root_dir: Option<PathBuf>, pkl_debug: bool) -> Result<Child> {
     let mut command = Command::new("pkl");
 
     command
@@ -334,6 +345,10 @@ fn start_pkl(pkl_debug: bool) -> Result<Child> {
 
     if pkl_debug {
         command.env("PKL_DEBUG", "1");
+    }
+
+    if let Some(dir) = root_dir {
+        command.current_dir(dir);
     }
 
     let child = command.spawn()?;
